@@ -46,13 +46,13 @@ Modify the following variables in the script to match your network setup:
 
 ```bash
 # Make the script executable
-chmod +x wireless_router.sh
+chmod +x mitmrouter.sh
 
 # Bring up the wireless router
-sudo ./wireless_router.sh up
+sudo ./mitmrouter.sh up
 
 # Tear down the wireless router
-sudo ./wireless_router.sh down
+sudo ./mitmrouter.sh down
 ```
 
 ## Troubleshooting
