@@ -21,7 +21,7 @@ This Bash script automates the process of creating a wireless router/access poin
 ## Prerequisites
 
 - Kali Linux 2024.04 (or similar Debian-based distribution)
-- Wireless adapter supporting AP mode
+- Wireless adapter supporting AP mode . tested with TP-Link wn722n v1
 - Root/sudo access
 
 ### Required Packages
