@@ -1,90 +1,91 @@
 #!/bin/bash
 
+# Detect network interfaces dynamically
+WAN_IFACE=$(ip route | grep default | awk '{print $5}')
+WIFI_IFACE=$(iwconfig 2>/dev/null | grep "IEEE 802.11" | awk '{print $1}' | head -n 1)
+LAN_IFACE=$(ip -br link | grep -v "lo" | grep -v "$WAN_IFACE" | grep -v "$WIFI_IFACE" | awk '{print $1}' | head -n 1)
+
 # VARIABLES
 BR_IFACE="br0"
-WAN_IFACE="eth0"
-LAN_IFACE="eth1"
-WIFI_IFACE="wlan0"
 WIFI_SSID="setec_astronomy"
 WIFI_PASSWORD="mypassword"
 
 LAN_IP="192.168.200.1"
-LAN_SUBNET="255.255.255.0"
+LAN_SUBNET="24"  # Using CIDR notation instead of netmask
 LAN_DHCP_START="192.168.200.10"
 LAN_DHCP_END="192.168.200.100"
 LAN_DNS_SERVER="1.1.1.1"
 
-DNSMASQ_CONF="tmp_dnsmasq.conf"
-HOSTAPD_CONF="tmp_hostapd.conf"
+DNSMASQ_CONF="/tmp/dnsmasq.conf"
+HOSTAPD_CONF="/tmp/hostapd.conf"
 
+# Validate interface detection
+if [ -z "$WAN_IFACE" ] || [ -z "$WIFI_IFACE" ] || [ -z "$LAN_IFACE" ]; then
+    echo "Error: Could not detect network interfaces"
+    echo "WAN: $WAN_IFACE, WIFI: $WIFI_IFACE, LAN: $LAN_IFACE"
+    exit 1
+fi
+
+# Check for required arguments
 if [ "$1" != "up" ] && [ "$1" != "down" ] || [ $# != 1 ]; then
-    echo "missing required argument"
-    echo "$0: <up/down>"
-    exit
+    echo "Usage: $0 <up/down>"
+    exit 1
 fi
 
-SCRIPT_RELATIVE_DIR=$(dirname "${BASH_SOURCE[0]}") 
-cd $SCRIPT_RELATIVE_DIR
+# Disable NetworkManager to prevent interference
+sudo systemctl stop NetworkManager 2>/dev/null
 
-echo "== stop router services"
-sudo killall wpa_supplicant
-sudo killall dnsmasq
+# Stop existing services
+sudo pkill -f wpa_supplicant
+sudo pkill -f dnsmasq
+sudo pkill -f hostapd
 
-echo "== reset all network interfaces"
-sudo ifconfig $LAN_IFACE 0.0.0.0
-sudo ifconfig $LAN_IFACE down
-sudo ifconfig $BR_IFACE 0.0.0.0
-sudo ifconfig $BR_IFACE down
-sudo ifconfig $WIFI_IFACE 0.0.0.0
-sudo ifconfig $WIFI_IFACE down
-sudo brctl delbr $BR_IFACE
+# Clean up existing bridge
+sudo ip link del "$BR_IFACE" 2>/dev/null
 
-if [ $1 = "up" ]; then
+if [ "$1" = "up" ]; then
+    # Create dnsmasq configuration
+    echo "interface=$BR_IFACE" > "$DNSMASQ_CONF"
+    echo "dhcp-range=$LAN_DHCP_START,$LAN_DHCP_END,12h" >> "$DNSMASQ_CONF"
+    echo "dhcp-option=6,$LAN_DNS_SERVER" >> "$DNSMASQ_CONF"
 
-    echo "== create dnsmasq config file"
-    echo "interface=${BR_IFACE}" > $DNSMASQ_CONF
-    echo "dhcp-range=${LAN_DHCP_START},${LAN_DHCP_END},${LAN_SUBNET},12h" >> $DNSMASQ_CONF
-    echo "dhcp-option=6,${LAN_DNS_SERVER}" >> $DNSMASQ_CONF
-    
-    echo "create hostapd config file"
-    echo "interface=${WIFI_IFACE}" > $HOSTAPD_CONF
-    echo "bridge=${BR_IFACE}" >> $HOSTAPD_CONF
-    echo "ssid=${WIFI_SSID}" >> $HOSTAPD_CONF
-    echo "country_code=US" >> $HOSTAPD_CONF
-    echo "hw_mode=g" >> $HOSTAPD_CONF
-    echo "channel=11" >> $HOSTAPD_CONF
-    echo "wpa=2" >> $HOSTAPD_CONF
-    echo "wpa_passphrase=${WIFI_PASSWORD}" >> $HOSTAPD_CONF
-    echo "wpa_key_mgmt=WPA-PSK" >> $HOSTAPD_CONF
-    echo "wpa_pairwise=CCMP" >> $HOSTAPD_CONF
-    echo "ieee80211n=1" >> $HOSTAPD_CONF
-    #echo "ieee80211w=1" >> $HOSTAPD_CONF # PMF
-    
-    echo "== bring up interfaces and bridge"
-    sudo ifconfig $WIFI_IFACE up
-    sudo ifconfig $WAN_IFACE up
-    sudo ifconfig $LAN_IFACE up
-    sudo brctl addbr $BR_IFACE
-    sudo brctl addif $BR_IFACE $LAN_IFACE
-    sudo ifconfig $BR_IFACE up
-    
-    echo "== setup iptables"
-    sudo iptables --flush
-    sudo iptables -t nat --flush
-    sudo iptables -t nat -A POSTROUTING -o $WAN_IFACE -j MASQUERADE
+    # Create hostapd configuration
+    cat > "$HOSTAPD_CONF" << EOF
+interface=$WIFI_IFACE
+bridge=$BR_IFACE
+ssid=$WIFI_SSID
+country_code=US
+hw_mode=g
+channel=11
+wpa=2
+wpa_passphrase=$WIFI_PASSWORD
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=CCMP
+ieee80211n=1
+EOF
+
+    # Bring up interfaces
+    sudo ip link set dev "$WIFI_IFACE" up
+    sudo ip link set dev "$WAN_IFACE" up
+    sudo ip link set dev "$LAN_IFACE" up
+
+    # Create bridge
+    sudo ip link add name "$BR_IFACE" type bridge
+    sudo ip link set "$LAN_IFACE" master "$BR_IFACE"
+    sudo ip link set "$BR_IFACE" up
+
+    # Configure IP
+    sudo ip addr add "$LAN_IP"/"$LAN_SUBNET" dev "$BR_IFACE"
+
+    # Setup NAT and forwarding
+    sudo sysctl -w net.ipv4.ip_forward=1
+    sudo iptables -t nat -F
+    sudo iptables -F
+    sudo iptables -t nat -A POSTROUTING -o "$WAN_IFACE" -j MASQUERADE
     sudo iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-    sudo iptables -A FORWARD -i $BR_IFACE -o $WAN_IFACE -j ACCEPT
-    # optional mitm rules
-    #sudo iptables -t nat -A PREROUTING -i $BR_IFACE -p tcp -d 1.2.3.4 --dport 443 -j REDIRECT --to-ports 8081
-    
-    
-    echo "== setting static IP on bridge interface"
-    sudo ifconfig br0 inet $LAN_IP netmask $LAN_SUBNET
-    
-    echo "== starting dnsmasq"
-    sudo dnsmasq -C $DNSMASQ_CONF
-    
-    echo "== starting hostapd"
-    sudo hostapd $HOSTAPD_CONF
-fi
+    sudo iptables -A FORWARD -i "$BR_IFACE" -o "$WAN_IFACE" -j ACCEPT
 
+    # Start services
+    sudo dnsmasq -C "$DNSMASQ_CONF"
+    sudo hostapd "$HOSTAPD_CONF"
+fi
