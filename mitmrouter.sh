@@ -7,7 +7,7 @@ LAN_IFACE=$(ip -br link | grep -v "lo" | grep -v "$WAN_IFACE" | grep -v "$WIFI_I
 
 # VARIABLES
 BR_IFACE="br0"
-WIFI_SSID="setec_astronomy"
+WIFI_SSID="engineer_debug"
 WIFI_PASSWORD="mypassword"
 
 LAN_IP="192.168.200.1"
