@@ -1,5 +1,5 @@
 # APSD - ex / mitmrouter
-Bash script to automate setup of Linux router useful for IoT device traffic analysis and SSL mitm
+Bash script to automate setup of Linux router useful for IoT device traffic analysis and SSL mitm.
 
 ![Arch](./img/arch.jpg)
 
@@ -17,6 +17,8 @@ This Bash script automates the process of creating a wireless router/access poin
 - Configure DHCP server
 - Create a secure WiFi access point
 - Easy up/down management
+- Cleans up iptables, bridge, and IP forwarding changes on `down`
+- Allows environment variable overrides for interfaces and config paths
 
 ## Prerequisites
 
@@ -41,6 +43,8 @@ Modify the following variables in the script to match your network setup:
 - `LAN_SUBNET`: Subnet in CIDR notation (e.g., 24 for 255.255.255.0)
 - `LAN_DHCP_START` and `LAN_DHCP_END`: DHCP address range
 - `LAN_DNS_SERVER`: DNS server to use
+- `DNSMASQ_CONF`, `HOSTAPD_CONF`, `DNSMASQ_PID_FILE`, `STATE_FILE`: Optional paths for generated configs/state
+- `WAN_IFACE`, `WIFI_IFACE`, `LAN_IFACE`: Override automatic interface detection
 
 ## Usage
 
@@ -49,11 +53,13 @@ Modify the following variables in the script to match your network setup:
 chmod +x mitmrouter.sh
 
 # Bring up the wireless router
-sudo ./mitmrouter.sh up
+sudo ./mitmrouter.sh up  # requires root privileges
 
 # Tear down the wireless router
 sudo ./mitmrouter.sh down
 ```
+
+The `down` command removes bridge membership, restores the previous IP forwarding value, deletes only the iptables rules created by the script (tagged `mitmrouter`), and restarts NetworkManager if it was active when `up` ran.
 
 ## Troubleshooting
 
@@ -85,5 +91,3 @@ Pull requests and improvements are welcome!
 The `./mitmrouter.sh up` command will bring down all the linux router components and then build them back up again
 
 The `./mitmrouter.sh down` command will bring down all the linux router components
-
-
